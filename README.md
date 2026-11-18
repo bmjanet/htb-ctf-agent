@@ -1,5 +1,7 @@
 # CTF Agent
 
+Based off of [verialabs/ctf-agent](https://github.com/verialabs/ctf-agent), extended with Hack The Box CTF support through HTB's official MCP server.
+
 Autonomous CTF (Capture The Flag) solver that races multiple AI models against challenges in parallel. Built in a weekend, we used it to solve all 52/52 challenges and win **1st place at BSidesSF 2026 CTF**.
 
 Built by [Veria Labs](https://verialabs.com), founded by members of [.;,;.](https://ctftime.org/team/222911) (smiley), the [#1 US CTF team on CTFTime in 2024 and 2025](https://ctftime.org/stats/2024/US). We build AI agents that find and exploit real security vulnerabilities for large enterprises.
@@ -153,22 +155,40 @@ cp .env.example .env
 ```
 
 ```env
+# Platform: ctfd (default) or htb
+PLATFORM=ctfd
+
+# CTFd
 CTFD_URL=https://ctf.example.com
 CTFD_TOKEN=ctfd_your_token
+
+# Hack The Box CTF (when PLATFORM=htb)
+HTB_MCP_TOKEN=...        # Profile Settings > MCP Access (shown once, expires)
+HTB_EVENT_ID=...         # auto-detected if you've joined exactly one event
+# HTB_TEAM_ID=...        # auto-detected via "my teams"
+# HTB_TOOL_SUBMIT_FLAG=  # override an auto-matched MCP tool name (see the probe script)
+
+# Model API keys (at least one)
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=...
 ```
 
-All settings can also be passed as environment variables or CLI flags.
+All settings can also be passed as environment variables or CLI flags (`--platform`, `--htb-event-id`, `--ctfd-url`, `--ctfd-token`).
+
+The platform is polled every 5 seconds for CTFd and every 15 seconds for HTB. Set `POLL_INTERVAL_S` to change this.
 
 ## Requirements
 
-- Python 3.14+
+- Python 3.14 (pinned in `.python-version`; `uv sync` installs it)
+- [`uv`](https://docs.astral.sh/uv/)
 - Docker
 - API keys for at least one provider (Anthropic, OpenAI, Google)
 - `codex` CLI (for Codex solver/coordinator)
 - `claude` CLI (bundled with claude-agent-sdk)
+- `7z` (optional, for AES-encrypted HTB zips)
+
+`pydantic-ai` is pinned below version 2, because V2 removed APIs this code uses.
 
 ## Acknowledgements
 
