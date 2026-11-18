@@ -54,17 +54,15 @@ async def do_spawn_swarm(deps: CoordinatorDeps, challenge_name: str) -> str:
 
     if challenge_name in deps.swarms:
         return f"Swarm still running for {challenge_name}"
-
-    # Auto-pull challenge if needed
-    if challenge_name not in deps.challenge_dirs:
-        challenges = await deps.ctfd.fetch_all_challenges()
-        ch_data = next((c for c in challenges if c.get("name") == challenge_name), None)
-        if not ch_data:
-            return f"Challenge '{challenge_name}' not found on CTFd"
-        output_dir = str(Path(deps.challenges_root))
-        ch_dir = await deps.ctfd.pull_challenge(ch_data, output_dir)
-        deps.challenge_dirs[challenge_name] = ch_dir
-        deps.challenge_metas[challenge_name] = ChallengeMeta.from_yaml(Path(ch_dir) / "metadata.yml")
+    if challenge_name in deps.spawning:
+        return f"Swarm for {challenge_name} is already being spawned"
+    deps.spawning.add(challenge_name)
+    try:
+        err = await _prepare_challenge(deps, challenge_name)
+    finally:
+        deps.spawning.discard(challenge_name)
+    if err:
+        return err
 
     from backend.agents.swarm import ChallengeSwarm
 
@@ -88,10 +86,65 @@ async def do_spawn_swarm(deps: CoordinatorDeps, challenge_name: str) -> str:
                 "flag": result.flag,
                 "submit": "DRY RUN" if deps.no_submit else "confirmed by solver",
             }
+            # Free the platform instance slot (HTB caps containers per team)
+            stop = getattr(deps.ctfd, "stop_instance", None)
+            if stop and not deps.no_submit:
+                try:
+                    await stop(challenge_name)
+                except Exception as e:
+                    logger.warning(f"stop_instance failed for {challenge_name}: {e}")
 
     task = asyncio.create_task(_run_and_cleanup(), name=f"swarm-{challenge_name}")
     deps.swarm_tasks[challenge_name] = task
     return f"Swarm spawned for {challenge_name} with {len(deps.model_specs)} models"
+
+
+async def _prepare_challenge(deps: CoordinatorDeps, challenge_name: str) -> str | None:
+    """Pull files if needed and start the challenge instance (HTB). Returns an error string or None."""
+    if challenge_name not in deps.challenge_dirs:
+        challenges = await deps.ctfd.fetch_all_challenges()
+        ch_data = next((c for c in challenges if c.get("name") == challenge_name), None)
+        if not ch_data:
+            return f"Challenge '{challenge_name}' not found on the platform"
+        output_dir = str(Path(deps.challenges_root))
+        ch_dir = await deps.ctfd.pull_challenge(ch_data, output_dir)
+        deps.challenge_dirs[challenge_name] = ch_dir
+
+    ch_dir = deps.challenge_dirs[challenge_name]
+    ensure = getattr(deps.ctfd, "ensure_instance", None)
+    if ensure:
+        try:
+            conn = await ensure(challenge_name, ch_dir)
+            if conn:
+                logger.info(f"Instance for {challenge_name}: {conn}")
+        except Exception as e:
+            logger.warning(f"ensure_instance failed for {challenge_name}: {e}")
+    deps.challenge_metas[challenge_name] = ChallengeMeta.from_yaml(Path(ch_dir) / "metadata.yml")
+    return None
+
+
+async def do_restart_instance(deps: CoordinatorDeps, challenge_name: str) -> str:
+    """Restart a challenge's remote instance and broadcast the new endpoint to its solvers."""
+    restart = getattr(deps.ctfd, "restart_instance", None)
+    if not restart:
+        return "This platform has no restartable instances."
+    ch_dir = deps.challenge_dirs.get(challenge_name)
+    if not ch_dir:
+        return f"Challenge '{challenge_name}' has not been pulled yet"
+    try:
+        conn = await restart(challenge_name, ch_dir)
+    except Exception as e:
+        return f"restart_instance error: {e}"
+    if not conn:
+        return f"Instance for {challenge_name} restarted but no endpoint was reported yet; retry shortly."
+    deps.challenge_metas[challenge_name] = ChallengeMeta.from_yaml(Path(ch_dir) / "metadata.yml")
+    swarm = deps.swarms.get(challenge_name)
+    if swarm:
+        await swarm.message_bus.broadcast(
+            f"The challenge instance was restarted. NEW connection: `{conn}`. "
+            "Use this endpoint from now on; any state on the old instance is gone."
+        )
+    return f"Instance for {challenge_name} restarted: {conn}"
 
 
 async def do_check_swarm_status(deps: CoordinatorDeps, challenge_name: str) -> str:

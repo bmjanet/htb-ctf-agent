@@ -16,6 +16,7 @@ from backend.agents.coordinator_core import (
     do_get_solve_status,
     do_kill_swarm,
     do_read_solver_trace,
+    do_restart_instance,
     do_spawn_swarm,
     do_submit_flag,
 )
@@ -36,6 +37,7 @@ Strategy:
 - Use read_solver_trace to monitor what each solver is doing and where it's stuck
 - When agents are stuck, read their traces, then craft targeted bumps with specific technical guidance
 - Use broadcast to share cross-solver insights (e.g. flag format discovery, shared vulnerabilities)
+- If solvers report the remote service is unreachable/reset (e.g. an HTB instance expired), call restart_instance
 
 CRITICAL RULES:
 - NEVER kill a swarm. Solvers will keep trying indefinitely with different approaches.
@@ -50,6 +52,15 @@ You will receive event messages. Respond with tool calls to manage the competiti
 """
 
 COORDINATOR_TOOLS = [
+    {
+        "name": "restart_instance",
+        "description": "Restart a challenge's remote instance (e.g. HTB container expired/unreachable) and broadcast the new endpoint to its solvers.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"challenge_name": {"type": "string"}},
+            "required": ["challenge_name"],
+        },
+    },
     {
         "name": "fetch_challenges",
         "description": "List all challenges with category, points, solve count, and status.",
@@ -80,7 +91,7 @@ COORDINATOR_TOOLS = [
     },
     {
         "name": "submit_flag",
-        "description": "Submit a flag to CTFd.",
+        "description": "Submit a flag to the CTF platform.",
         "inputSchema": {
             "type": "object",
             "properties": {"challenge_name": {"type": "string"}, "flag": {"type": "string"}},
@@ -316,6 +327,8 @@ class CodexCoordinator:
             return await do_bump_agent(deps, args["challenge_name"], args["model_spec"], args["insights"])
         elif name == "broadcast":
             return await do_broadcast(deps, args["challenge_name"], args["message"])
+        elif name == "restart_instance":
+            return await do_restart_instance(deps, args["challenge_name"])
         elif name == "read_solver_trace":
             return await do_read_solver_trace(deps, args["challenge_name"], args["model_spec"], args.get("last_n", 20))
         else:

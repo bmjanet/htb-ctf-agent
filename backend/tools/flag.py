@@ -7,7 +7,7 @@ from backend.tools.core import do_submit_flag
 
 
 async def submit_flag(ctx: RunContext[SolverDeps], flag: str) -> str:
-    """Submit a flag to CTFd to verify it. Always call this before reporting a flag.
+    """Submit a flag to the CTF platform to verify it. Always call this before reporting a flag.
 
     Returns CORRECT, ALREADY SOLVED, or INCORRECT.
     Do NOT submit placeholder flags like CTF{flag} or CTF{placeholder}.

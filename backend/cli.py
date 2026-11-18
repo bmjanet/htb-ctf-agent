@@ -29,6 +29,8 @@ def _setup_logging(verbose: bool = False) -> None:
 
 
 @click.command()
+@click.option("--platform", "platform_name", default=None, type=click.Choice(["ctfd", "htb"]), help="CTF platform (overrides .env PLATFORM; default ctfd)")
+@click.option("--htb-event-id", default=None, help="HTB CTF event id (overrides .env HTB_EVENT_ID)")
 @click.option("--ctfd-url", default=None, help="CTFd URL (overrides .env)")
 @click.option("--ctfd-token", default=None, help="CTFd API token (overrides .env)")
 @click.option("--image", default="ctf-sandbox", help="Docker sandbox image name")
@@ -42,6 +44,8 @@ def _setup_logging(verbose: bool = False) -> None:
 @click.option("--msg-port", default=0, type=int, help="Operator message port (0 = auto)")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose logging")
 def main(
+    platform_name: str | None,
+    htb_event_id: str | None,
     ctfd_url: str | None,
     ctfd_token: str | None,
     image: str,
@@ -62,6 +66,10 @@ def main(
     _setup_logging(verbose)
 
     settings = Settings(sandbox_image=image)
+    if platform_name:
+        settings.platform = platform_name
+    if htb_event_id:
+        settings.htb_event_id = htb_event_id
     if ctfd_url:
         settings.ctfd_url = ctfd_url
     if ctfd_token:
@@ -71,7 +79,10 @@ def main(
     model_specs = list(models) if models else list(DEFAULT_MODELS)
 
     console.print("[bold]CTF Agent v2[/bold]")
-    console.print(f"  CTFd: {settings.ctfd_url}")
+    if settings.platform == "htb":
+        console.print(f"  Platform: HTB CTF MCP ({settings.htb_mcp_url}, event {settings.htb_event_id or 'auto'})")
+    else:
+        console.print(f"  CTFd: {settings.ctfd_url}")
     console.print(f"  Models: {', '.join(model_specs)}")
     console.print(f"  Image: {settings.sandbox_image}")
     console.print(f"  Max challenges: {max_challenges}")
@@ -93,7 +104,7 @@ async def _run_single(
     """Run a single challenge with a swarm."""
     from backend.agents.swarm import ChallengeSwarm
     from backend.cost_tracker import CostTracker
-    from backend.ctfd import CTFdClient
+    from backend.platform_client import make_platform_client
     from backend.prompts import ChallengeMeta
     from backend.sandbox import cleanup_orphan_containers, configure_semaphore
 
@@ -108,14 +119,20 @@ async def _run_single(
         sys.exit(1)
 
     meta = ChallengeMeta.from_yaml(meta_path)
-    console.print(f"[bold]Challenge:[/bold] {meta.name} ({meta.category}, {meta.value} pts)")
+    ctfd = make_platform_client(settings)
 
-    ctfd = CTFdClient(
-        base_url=settings.ctfd_url,
-        token=settings.ctfd_token,
-        username=settings.ctfd_user,
-        password=settings.ctfd_pass,
-    )
+    # HTB: start (or reuse) the challenge container and refresh connection_info
+    ensure = getattr(ctfd, "ensure_instance", None)
+    if ensure:
+        try:
+            conn = await ensure(meta.name, str(challenge_path))
+            if conn:
+                console.print(f"[bold]Instance:[/bold] {conn}")
+                meta = ChallengeMeta.from_yaml(meta_path)
+        except Exception as e:
+            console.print(f"[yellow]Could not start instance: {e}[/yellow]")
+
+    console.print(f"[bold]Challenge:[/bold] {meta.name} ({meta.category}, {meta.value} pts)")
     cost_tracker = CostTracker()
 
     swarm = ChallengeSwarm(

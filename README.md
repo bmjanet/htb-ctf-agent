@@ -76,6 +76,29 @@ uv run ctf-solve \
   -v
 ```
 
+## Hack The Box CTF (via HTB's MCP server)
+
+The platform layer also supports HTB CTF events through HTB's official CTF MCP server
+(`https://mcp.hackthebox.ai/v1/ctf/mcp/`). It lists challenges, downloads and unzips files
+(password `hackthebox`), starts containers, and submits flags.
+
+```bash
+# 1. Get a token: HTB Profile Settings > MCP Access > Generate Token (shown once)
+export HTB_MCP_TOKEN=...
+
+# 2. Before the event: probe the real tool names / payloads (read-only, no submissions)
+uv run python scripts/htb_mcp_probe.py --event-id <ID>
+
+# 3. Dry run, then go live
+uv run ctf-solve --platform htb --htb-event-id <ID> --no-submit --max-challenges 1 -v
+uv run ctf-solve --platform htb --htb-event-id <ID> --max-challenges 10
+```
+
+HTB doesn't publish the MCP tool names, so `backend/htb_mcp.py` matches them by keyword.
+If the probe shows a wrong mapping, override it with `HTB_TOOL_<OP>=<tool name>`, for example
+`HTB_TOOL_SUBMIT_FLAG=submit_ctf_flag`. Containers start when a challenge's swarm spawns and
+stop once it's solved. The coordinator can call `restart_instance` when an instance dies.
+
 ## Coordinator Backends
 
 ```bash

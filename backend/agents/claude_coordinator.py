@@ -22,6 +22,7 @@ from backend.agents.coordinator_core import (
     do_get_solve_status,
     do_kill_swarm,
     do_read_solver_trace,
+    do_restart_instance,
     do_spawn_swarm,
     do_submit_flag,
 )
@@ -40,6 +41,7 @@ Strategy:
 - Use read_solver_trace to monitor what each solver is doing and where it's stuck
 - When agents are stuck, read their traces, then craft targeted bumps with specific technical guidance
 - Use broadcast to share cross-solver insights (e.g. flag format discovery, shared vulnerabilities)
+- If solvers report the remote service is unreachable/reset (e.g. an HTB instance expired), call restart_instance
 
 CRITICAL RULES:
 - NEVER kill a swarm. Solvers will keep trying indefinitely with different approaches.
@@ -78,7 +80,7 @@ def _build_coordinator_mcp(deps: CoordinatorDeps):
     async def check_swarm_status(args: dict) -> dict:
         return _text(await do_check_swarm_status(deps, args["challenge_name"]))
 
-    @tool("submit_flag", "Submit a flag to CTFd.", {"challenge_name": str, "flag": str})
+    @tool("submit_flag", "Submit a flag to the CTF platform.", {"challenge_name": str, "flag": str})
     async def submit_flag(args: dict) -> dict:
         return _text(await do_submit_flag(deps, args["challenge_name"], args["flag"]))
 
@@ -98,10 +100,15 @@ def _build_coordinator_mcp(deps: CoordinatorDeps):
     async def read_solver_trace(args: dict) -> dict:
         return _text(await do_read_solver_trace(deps, args["challenge_name"], args["model_spec"], args.get("last_n", 20)))
 
+    @tool("restart_instance", "Restart a challenge's remote instance (e.g. HTB container expired/unreachable) and broadcast the new endpoint to its solvers.", {"challenge_name": str})
+    async def restart_instance(args: dict) -> dict:
+        return _text(await do_restart_instance(deps, args["challenge_name"]))
+
     return create_sdk_mcp_server(
         name="coordinator", version="1.0.0",
         tools=[fetch_challenges, get_solve_status, spawn_swarm, check_swarm_status,
-               submit_flag, kill_swarm, bump_agent, broadcast, read_solver_trace],
+               submit_flag, kill_swarm, bump_agent, broadcast, read_solver_trace,
+               restart_instance],
     )
 
 
@@ -127,7 +134,7 @@ async def run_claude_coordinator(
         "mcp__coordinator__spawn_swarm", "mcp__coordinator__check_swarm_status",
         "mcp__coordinator__submit_flag", "mcp__coordinator__kill_swarm",
         "mcp__coordinator__bump_agent", "mcp__coordinator__broadcast",
-        "mcp__coordinator__read_solver_trace",
+        "mcp__coordinator__read_solver_trace", "mcp__coordinator__restart_instance",
         "ToolSearch",
         "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
     }

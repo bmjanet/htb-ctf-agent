@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from backend.cost_tracker import CostTracker
-from backend.ctfd import CTFdClient
+from backend.platform_client import PlatformClient
 from backend.sandbox import DockerSandbox
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ SubmitFn = Callable[[str], Coroutine[Any, Any, tuple[str, bool]]]
 @dataclass
 class SolverDeps:
     sandbox: DockerSandbox
-    ctfd: CTFdClient
+    ctfd: PlatformClient
     challenge_dir: str
     challenge_name: str
     workspace_dir: str
@@ -37,7 +37,7 @@ class SolverDeps:
 
 @dataclass
 class CoordinatorDeps:
-    ctfd: CTFdClient
+    ctfd: PlatformClient
     cost_tracker: CostTracker
     settings: Any
     model_specs: list[str] = field(default_factory=list)
@@ -52,6 +52,7 @@ class CoordinatorDeps:
     operator_inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
     swarms: dict[str, Any] = field(default_factory=dict)
     swarm_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
+    spawning: set[str] = field(default_factory=set)  # challenges mid-spawn (pull/instance start)
     results: dict[str, dict] = field(default_factory=dict)
     challenge_dirs: dict[str, str] = field(default_factory=dict)
     challenge_metas: dict[str, Any] = field(default_factory=dict)

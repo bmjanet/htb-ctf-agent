@@ -6,6 +6,17 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # Platform: "ctfd" or "htb" (Hack The Box CTF via its official MCP server)
+    platform: str = "ctfd"
+    poll_interval_s: float = 0  # 0 = auto (5s CTFd, 15s HTB)
+
+    # HTB CTF MCP
+    htb_mcp_url: str = "https://mcp.hackthebox.ai/v1/ctf/mcp/"
+    htb_mcp_token: str = ""
+    htb_event_id: str = ""  # empty = auto-detect if exactly one event is joinable/joined
+    htb_team_id: str = ""  # empty = auto-detect via "my teams"
+    htb_zip_password: str = "hackthebox"
+
     # CTFd
     ctfd_url: str = "http://localhost:8000"
     ctfd_user: str = "admin"

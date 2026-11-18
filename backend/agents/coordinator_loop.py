@@ -11,9 +11,9 @@ from typing import Any
 
 from backend.config import Settings
 from backend.cost_tracker import CostTracker
-from backend.ctfd import CTFdClient
 from backend.deps import CoordinatorDeps
 from backend.models import DEFAULT_MODELS
+from backend.platform_client import PlatformClient, make_platform_client
 from backend.poller import CTFdPoller
 from backend.prompts import ChallengeMeta
 
@@ -30,14 +30,9 @@ def build_deps(
     no_submit: bool = False,
     challenge_dirs: dict[str, str] | None = None,
     challenge_metas: dict[str, ChallengeMeta] | None = None,
-) -> tuple[CTFdClient, CostTracker, CoordinatorDeps]:
-    """Create CTFd client, cost tracker, and coordinator deps."""
-    ctfd = CTFdClient(
-        base_url=settings.ctfd_url,
-        token=settings.ctfd_token,
-        username=settings.ctfd_user,
-        password=settings.ctfd_pass,
-    )
+) -> tuple[PlatformClient, CostTracker, CoordinatorDeps]:
+    """Create platform client (CTFd or HTB MCP), cost tracker, and coordinator deps."""
+    ctfd = make_platform_client(settings)
     cost_tracker = CostTracker()
     specs = model_specs or list(DEFAULT_MODELS)
     Path(challenges_root).mkdir(parents=True, exist_ok=True)
@@ -68,7 +63,7 @@ def build_deps(
 
 async def run_event_loop(
     deps: CoordinatorDeps,
-    ctfd: CTFdClient,
+    ctfd: PlatformClient,
     cost_tracker: CostTracker,
     turn_fn: TurnFn,
     status_interval: int = 60,
@@ -82,7 +77,10 @@ async def run_event_loop(
         turn_fn: Async function that sends a message to the coordinator LLM.
         status_interval: Seconds between status updates.
     """
-    poller = CTFdPoller(ctfd=ctfd, interval_s=5.0)
+    interval = getattr(deps.settings, "poll_interval_s", 0) or (
+        15.0 if getattr(deps.settings, "platform", "ctfd") == "htb" else 5.0
+    )
+    poller = CTFdPoller(ctfd=ctfd, interval_s=interval)
     await poller.start()
 
     # Start operator message HTTP endpoint
@@ -223,10 +221,50 @@ async def _auto_spawn_one(deps: CoordinatorDeps, challenge_name: str) -> None:
         logger.warning(f"Auto-spawn failed for {challenge_name}: {e}")
 
 
+async def _warm_up(deps: CoordinatorDeps, names: set[str]) -> None:
+    """Pull (download + unzip) all given challenges in parallel before spawning swarms."""
+    todo = [n for n in names if n not in deps.challenge_dirs]
+    if not todo:
+        return
+    try:
+        challenges = {c.get("name"): c for c in await deps.ctfd.fetch_all_challenges()}
+    except Exception as e:
+        logger.warning(f"Warm-up fetch failed: {e}")
+        return
+    sem = asyncio.Semaphore(8)
+
+    async def _pull(name: str) -> None:
+        ch = challenges.get(name)
+        if not ch:
+            return
+        async with sem:
+            try:
+                ch_dir = await deps.ctfd.pull_challenge(ch, str(Path(deps.challenges_root)))
+                deps.challenge_dirs[name] = ch_dir
+                deps.challenge_metas[name] = ChallengeMeta.from_yaml(Path(ch_dir) / "metadata.yml")
+            except Exception as e:
+                logger.warning(f"Warm-up pull failed for {name}: {e}")
+
+    await asyncio.gather(*(_pull(n) for n in todo))
+    logger.info(f"Warm-up: pulled {len(todo)} challenges")
+
+
 async def _auto_spawn_unsolved(deps: CoordinatorDeps, poller) -> None:
-    """Auto-spawn swarms for all unsolved challenges that don't have active swarms."""
+    """Auto-spawn swarms for all unsolved challenges, easiest (most solves) first.
+
+    Files are pulled in parallel first; spawns then run concurrently so instance
+    start-up (HTB containers) overlaps instead of serializing.
+    """
     unsolved = poller.known_challenges - poller.known_solved
-    for name in sorted(unsolved):
+    await _warm_up(deps, unsolved)
+
+    def _solves(name: str) -> int:
+        meta = deps.challenge_metas.get(name)
+        return -(getattr(meta, "solves", 0) or 0)
+
+    order = sorted(unsolved, key=lambda n: (_solves(n), n))
+    await asyncio.gather(*(_auto_spawn_one(deps, n) for n in order[: deps.max_concurrent_challenges]))
+    for name in order[deps.max_concurrent_challenges:]:
         await _auto_spawn_one(deps, name)
 
 

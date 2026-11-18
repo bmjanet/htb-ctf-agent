@@ -43,7 +43,8 @@ def list_distfiles(challenge_dir: str) -> list[str]:
     dist = Path(challenge_dir) / "distfiles"
     if not dist.exists():
         return []
-    return sorted(f.name for f in dist.iterdir() if f.is_file())
+    # Recursive: HTB zips are extracted into subdirectories next to the archive
+    return sorted(str(f.relative_to(dist)) for f in dist.rglob("*") if f.is_file())
 
 
 def _rewrite_connection_info(conn: str) -> str:
@@ -69,7 +70,7 @@ def build_prompt(
     """
     conn_info = _rewrite_connection_info(meta.connection_info.strip())
 
-    lines: list[str] = [
+    lines: list[str | None] = [
         "You are an expert CTF solver. Find the real flag for the challenge below.",
         "",
     ]
@@ -173,9 +174,17 @@ def build_prompt(
         ),
         "   - Pwn: `stty raw -echo` before launching vulnerable binaries over nc.",
         '4. **Ignore placeholder flags** — `CTF{flag}`, `CTF{placeholder}` are not real flags.',
+        (
+            "   - Hack The Box flags look like `HTB{...}`; a fake `HTB{f4k3_fl4g...}` in local "
+            "files usually means the real one is on the remote instance."
+        ) if "htb" in [t.lower() for t in meta.tags] else None,
+        (
+            "   - If the remote instance is unreachable or reset, notify the coordinator "
+            "so it can restart it — the new endpoint will be broadcast to you."
+        ) if "docker" in [t.lower() for t in meta.tags] else None,
         f"5. {submit_hint}",
         "6. Once CORRECT: output `FLAG: <value>` on its own line.",
         "7. Do not guess. Do not ask. Cover maximum surface area.",
     ]
 
-    return "\n".join(lines)
+    return "\n".join(line for line in lines if line is not None)

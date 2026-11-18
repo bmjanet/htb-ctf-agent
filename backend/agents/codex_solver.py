@@ -21,7 +21,7 @@ import time
 from typing import Any
 
 from backend.cost_tracker import CostTracker
-from backend.ctfd import CTFdClient
+from backend.platform_client import PlatformClient
 from backend.loop_detect import LoopDetector
 from backend.models import model_id_from_spec, supports_vision
 from backend.output_types import solver_output_json_schema
@@ -85,7 +85,7 @@ SANDBOX_TOOLS = [
     },
     {
         "name": "submit_flag",
-        "description": "Submit a flag to CTFd. Returns CORRECT, ALREADY SOLVED, or INCORRECT.",
+        "description": "Submit a flag to the CTF platform. Returns CORRECT, ALREADY SOLVED, or INCORRECT.",
         "inputSchema": {"type": "object", "properties": {"flag": {"type": "string"}}, "required": ["flag"]},
     },
     {
@@ -124,7 +124,7 @@ class CodexSolver:
         model_spec: str,
         challenge_dir: str,
         meta: ChallengeMeta,
-        ctfd: CTFdClient,
+        ctfd: PlatformClient,
         cost_tracker: CostTracker,
         settings: object,
         cancel_event: asyncio.Event | None = None,
