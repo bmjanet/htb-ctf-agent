@@ -84,17 +84,37 @@ The platform layer also supports HTB CTF events through HTB's official CTF MCP s
 (`https://mcp.hackthebox.ai/v1/ctf/mcp/`). It lists challenges, downloads and unzips files
 (password `hackthebox`), starts containers, and submits flags.
 
-```bash
-# 1. Get a token: HTB Profile Settings > MCP Access > Generate Token (shown once)
-export HTB_MCP_TOKEN=...
+### Quick Start Hack The Box
 
-# 2. Before the event: probe the real tool names / payloads (read-only, no submissions)
+```bash
+# Install
+uv sync
+
+# Build sandbox image
+docker build -f sandbox/Dockerfile.sandbox -t ctf-sandbox .
+
+# Configure credentials
+cp .env.example .env
+# Edit .env: set PLATFORM=htb, HTB_MCP_TOKEN, HTB_EVENT_ID, and your model API keys.
+# Get the token at HTB Profile Settings > MCP Access > Generate Token (it is shown once).
+
+# Before the event: probe the real MCP tool names and payloads
+# (read-only: it never submits flags or starts containers)
 uv run python scripts/htb_mcp_probe.py --event-id <ID>
 
-# 3. Dry run, then go live
+# Dry run on one challenge (no flag submissions)
 uv run ctf-solve --platform htb --htb-event-id <ID> --no-submit --max-challenges 1 -v
-uv run ctf-solve --platform htb --htb-event-id <ID> --max-challenges 10
+
+# Go live
+uv run ctf-solve \
+  --platform htb \
+  --htb-event-id <ID> \
+  --challenges-dir challenges \
+  --max-challenges 10 \
+  -v
 ```
+
+Each command-line option overrides the matching `.env` value. The probe reads `HTB_MCP_TOKEN` from the environment only, so export it or prefix it on that command.
 
 HTB doesn't publish the MCP tool names, so `backend/htb_mcp.py` matches them by keyword.
 If the probe shows a wrong mapping, override it with `HTB_TOOL_<OP>=<tool name>`, for example
